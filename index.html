@@ -63,6 +63,10 @@
     <div id="videoModal" class="modal hidden items-center justify-center bg-black">
         <!-- Botão para fechar -->
         <button onclick="closeVideoModal()" class="absolute top-4 right-4 text-white text-2xl font-bold">&times;</button>
+        <!-- Botão de reprodução em segundo plano (overlay) -->
+        <button id="bgPlayButton" class="absolute bottom-4 left-4 px-4 py-2 text-sm font-semibold rounded-full bg-indigo-600 hover:bg-indigo-500 text-white transition-colors duration-200">
+            Segundo plano
+        </button>
         <!-- Container do player (100% largura/altura) -->
         <div id="videoPlayerContainer" class="w-full h-full"></div>
     </div>
@@ -164,11 +168,6 @@
                             <option value="watched">Assistidos</option>
                         </select>
                     </div>
-                </div>
-                <div class="flex justify-end mb-4">
-                    <button id="bgPlayButton" class="px-4 py-2 text-sm font-semibold rounded-full bg-indigo-600 hover:bg-indigo-500 text-white transition-colors duration-200">
-                        Segundo plano
-                    </button>
                 </div>
                 <div id="curatedFeedContainer" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                     <!-- User's curated videos will be injected here by JavaScript -->
