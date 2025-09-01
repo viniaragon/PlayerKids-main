@@ -68,7 +68,7 @@
             Segundo plano
         </button>
         <!-- Container do player (100% largura/altura) -->
-        <div id="videoPlayerContainer" class="w-full h-full"></div>
+        <div id="videoPlayerContainer" class="w-full max-w-5xl aspect-video bg-black rounded-lg overflow-hidden shadow-xl"></div>
     </div>
 
     <!-- Container da Aplicação -->
@@ -115,6 +115,7 @@
                         </button>
                         <!-- Dropdown menu -->
                         <div id="userMenu" class="hidden absolute right-0 mt-2 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-lg overflow-hidden z-20">
+                            <button id="goToFeedMenuItem" class="w-full text-left px-4 py-2 text-gray-200 hover:bg-gray-700 transition-colors">Ir para o Feed</button>
                             <button id="openSettings" class="w-full text-left px-4 py-2 text-gray-200 hover:bg-gray-700 transition-colors">Configurações</button>
                             <button id="logoutMenuItem" class="w-full text-left px-4 py-2 text-red-400 hover:bg-gray-700 transition-colors">Sair</button>
                         </div>
@@ -132,6 +133,30 @@
             <!-- Search Results Section -->
             <section id="searchResultsContainer" class="hidden flex-col mb-8">
                 <h2 class="text-2xl font-semibold mb-4 text-center">Resultados da Busca</h2>
+                <div id="searchFilters" class="flex flex-wrap items-center justify-center gap-3 mb-4">
+                    <select id="orderSelect" class="px-3 py-2 bg-gray-800 text-gray-200 border border-gray-700 rounded-full text-sm">
+                        <option value="relevance">Relevância</option>
+                        <option value="date">Data de envio</option>
+                        <option value="viewCount">Mais visualizados</option>
+                    </select>
+                    <select id="uploadDateSelect" class="px-3 py-2 bg-gray-800 text-gray-200 border border-gray-700 rounded-full text-sm">
+                        <option value="any">Qualquer data</option>
+                        <option value="hour">Última hora</option>
+                        <option value="day">Hoje</option>
+                        <option value="week">Esta semana</option>
+                        <option value="month">Este mês</option>
+                        <option value="year">Este ano</option>
+                    </select>
+                    <select id="durationSelect" class="px-3 py-2 bg-gray-800 text-gray-200 border border-gray-700 rounded-full text-sm">
+                        <option value="any">Qualquer duração</option>
+                        <option value="short">Curtos (até 4 min)</option>
+                        <option value="medium">Médios (4–20 min)</option>
+                        <option value="long">Longos (20+ min)</option>
+                    </select>
+                </div>
+                <div class="flex justify-end mb-3">
+                    <button id="exitSearchButton" class="px-3 py-1.5 text-sm font-semibold rounded-full bg-gray-700 hover:bg-gray-600 text-gray-100 transition-colors">Sair da busca</button>
+                </div>
                 <div id="searchResultsGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                     <!-- Search results will be injected here by JavaScript -->
                 </div>
@@ -139,7 +164,7 @@
             </section>
 
             <!-- Main Video Feed Section -->
-            <section class="flex-1 overflow-y-auto scroll-container">
+            <section id="feedSection" class="flex-1 overflow-y-auto scroll-container">
                 <div class="flex flex-col sm:flex-row justify-between items-center mb-4">
                     <h2 class="text-2xl font-semibold mb-2 sm:mb-0">Seu Feed Personalizado</h2>
                     <!-- Botão de sugestões de vídeos com ✨ Gemini API -->
@@ -189,6 +214,11 @@
         let appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         let player;
         let isDragging = false;
+        let appSettings = {
+            autoplayEnabled: true,
+            autoplayMode: 'feed', // 'feed' | 'youtube'
+            ytSync: false
+        };
         
         // A sua chave da API do YouTube
         const YOUTUBE_API_KEY = "AIzaSyAmNMrkBFKqaUV-aOa1XBtJ5sEKBjDJwWA";
@@ -199,19 +229,48 @@
         };
 
         // Função para lidar com o fim de um vídeo
-        function onPlayerStateChange(event) {
+        async function onPlayerStateChange(event) {
             // Verifica se o vídeo terminou
             if (event.data === YT.PlayerState.ENDED) {
                 const currentVideoId = event.target.getVideoData().video_id;
+
+                // Autoplay desativado
+                if (!appSettings.autoplayEnabled) {
+                    closeVideoModal();
+                    return;
+                }
+
+                // Modo 'youtube' (sugestões do YouTube)
+                if (appSettings.autoplayMode === 'youtube') {
+                    try {
+                        const params = new URLSearchParams({
+                            part: 'snippet',
+                            type: 'video',
+                            key: YOUTUBE_API_KEY,
+                            maxResults: '1',
+                            relatedToVideoId: currentVideoId
+                        });
+                        const url = `https://www.googleapis.com/youtube/v3/search?${params.toString()}`;
+                        const res = await fetch(url);
+                        const data = await res.json();
+                        const nextId = data?.items?.[0]?.id?.videoId;
+                        if (nextId) {
+                            playVideo(nextId);
+                            return;
+                        }
+                    } catch (e) {
+                        console.warn('Falha ao buscar sugestão do YouTube, caindo para feed:', e);
+                    }
+                    // fallback para feed
+                }
+
+                // Modo 'feed' (ou fallback): próximo do feed
                 const currentIndex = curatedFeed.findIndex(v => v.id === currentVideoId);
                 const nextIndex = currentIndex + 1;
-
-                // Se houver um próximo vídeo no feed, reproduza-o
                 if (nextIndex < curatedFeed.length) {
                     const nextVideoId = curatedFeed[nextIndex].id;
                     playVideo(nextVideoId);
                 } else {
-                    // Se for o último vídeo, feche o modal
                     closeVideoModal();
                 }
             }
@@ -231,6 +290,11 @@
             const searchButton = document.getElementById('searchButton');
             const searchResultsContainer = document.getElementById('searchResultsContainer');
             const searchResultsGrid = document.getElementById('searchResultsGrid');
+            const exitSearchButton = document.getElementById('exitSearchButton');
+            const feedSection = document.getElementById('feedSection');
+            const orderSelect = document.getElementById('orderSelect');
+            const uploadDateSelect = document.getElementById('uploadDateSelect');
+            const durationSelect = document.getElementById('durationSelect');
             const curatedFeedContainer = document.getElementById('curatedFeedContainer');
             const appModal = document.getElementById('appModal');
             const modalTitle = document.getElementById('modalTitle');
@@ -244,6 +308,7 @@
             const watchedFilter = document.getElementById('watchedFilter');
             const userMenuButton = document.getElementById('userMenuButton');
             const userMenu = document.getElementById('userMenu');
+            const goToFeedMenuItem = document.getElementById('goToFeedMenuItem');
             const logoutMenuItem = document.getElementById('logoutMenuItem');
             const openSettings = document.getElementById('openSettings');
             const bgPlayButton = document.getElementById('bgPlayButton');
@@ -294,6 +359,7 @@
                     authScreen.classList.add('hidden');
                     mainApp.classList.remove('hidden');
                     listenToCuratedFeed();
+                    listenToSettings();
                 } else {
                     // Se o usuário não estiver logado, mostra a tela de autenticação
                     mainApp.classList.add('hidden');
@@ -340,7 +406,94 @@
             }
             if (openSettings) {
                 openSettings.addEventListener('click', () => {
-                    showModal('Configurações', '<p class="text-gray-300">Em breve: preferências e ajustes da conta.</p>');
+                    const html = `
+                        <div class="space-y-4">
+                            <div>
+                                <label class="flex items-center gap-2">
+                                    <input type="checkbox" id="stgAutoplay" class="accent-blue-500" ${appSettings.autoplayEnabled ? 'checked' : ''}>
+                                    <span class="font-medium">Reprodução automática</span>
+                                </label>
+                                <p class="text-xs text-gray-400 mt-1">Ative para reproduzir o próximo vídeo automaticamente.</p>
+                            </div>
+                            <div id="stgAutoplayModeWrap" class="${appSettings.autoplayEnabled ? '' : 'opacity-50 pointer-events-none'}">
+                                <label class="block text-sm font-medium mb-2">Próximo vídeo</label>
+                                <label class="flex items-center gap-2 mb-1">
+                                    <input type="radio" name="stgAutoplayMode" value="feed" ${appSettings.autoplayMode === 'feed' ? 'checked' : ''}>
+                                    <span>Seguir ordem do seu Feed</span>
+                                </label>
+                                <label class="flex items-center gap-2">
+                                    <input type="radio" name="stgAutoplayMode" value="youtube" ${appSettings.autoplayMode === 'youtube' ? 'checked' : ''}>
+                                    <span>Sugestão do YouTube</span>
+                                </label>
+                            </div>
+                            <hr class="border-gray-700">
+                            <div>
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="font-medium">Sincronizar com conta do YouTube</div>
+                                        <p class="text-xs text-gray-400">Aproveite preferências e recomendações da sua conta.</p>
+                                    </div>
+                                    <button id="ytConnectBtn" class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600">Conectar</button>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-2">Nota: integração completa requer login Google (em breve). Por ora, salvamos apenas sua preferência aqui.</p>
+                            </div>
+                            <div class="flex justify-end gap-2">
+                                <button id="stgClose" class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600">Fechar</button>
+                                <button id="stgSave" class="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-gray-900">Salvar</button>
+                            </div>
+                        </div>`;
+                    showModal('Configurações', html);
+                    if (userMenu) userMenu.classList.add('hidden');
+
+                    const stgAutoplay = document.getElementById('stgAutoplay');
+                    const stgAutoplayModeWrap = document.getElementById('stgAutoplayModeWrap');
+                    const stgSave = document.getElementById('stgSave');
+                    const stgClose = document.getElementById('stgClose');
+                    const ytConnectBtn = document.getElementById('ytConnectBtn');
+                    const modeInputs = Array.from(document.querySelectorAll('input[name="stgAutoplayMode"]'));
+
+                    stgAutoplay?.addEventListener('change', () => {
+                        if (stgAutoplay.checked) {
+                            stgAutoplayModeWrap.classList.remove('opacity-50','pointer-events-none');
+                        } else {
+                            stgAutoplayModeWrap.classList.add('opacity-50','pointer-events-none');
+                        }
+                    });
+
+                    ytConnectBtn?.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        showModal('Conectar YouTube', '<p class="text-gray-300">Integração com a conta do YouTube virá em breve. Por enquanto, mantenha suas preferências salvas aqui.</p>');
+                    });
+
+                    stgClose?.addEventListener('click', () => closeModal());
+                    stgSave?.addEventListener('click', async () => {
+                        const enabled = !!stgAutoplay?.checked;
+                        let mode = appSettings.autoplayMode;
+                        if (enabled) {
+                            const sel = modeInputs.find(i => i.checked);
+                            if (sel) mode = sel.value;
+                        }
+                        await saveSettings({ autoplayEnabled: enabled, autoplayMode: mode });
+                        closeModal();
+                    });
+                });
+            }
+
+            function exitSearch() {
+                if (searchResultsContainer) searchResultsContainer.classList.add('hidden');
+                if (feedSection) feedSection.classList.remove('hidden');
+                if (searchResultsGrid) searchResultsGrid.innerHTML = '';
+                if (orderSelect) orderSelect.value = 'relevance';
+                if (uploadDateSelect) uploadDateSelect.value = 'any';
+                if (durationSelect) durationSelect.value = 'any';
+            }
+
+            if (exitSearchButton) {
+                exitSearchButton.addEventListener('click', () => exitSearch());
+            }
+            if (goToFeedMenuItem) {
+                goToFeedMenuItem.addEventListener('click', () => {
+                    exitSearch();
                     if (userMenu) userMenu.classList.add('hidden');
                 });
             }
@@ -414,6 +567,7 @@
 
             // --- Realtime Database Functions ---
             const curatedFeedRef = () => ref(db, `/artifacts/${appId}/users/${userId}/curated_feed/feed_doc`);
+            const settingsRef = () => ref(db, `/artifacts/${appId}/users/${userId}/settings`);
 
             const listenToCuratedFeed = () => {
                 if (!userId) {
@@ -428,6 +582,31 @@
                     console.error("Erro ao ouvir o feed:", error);
                     showModal("Erro de Banco de Dados", "Não foi possível carregar o seu feed. Por favor, tente novamente.");
                 });
+            };
+
+            const listenToSettings = () => {
+                if (!userId) return;
+                onValue(settingsRef(), (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        appSettings = {
+                            autoplayEnabled: data.autoplayEnabled ?? appSettings.autoplayEnabled,
+                            autoplayMode: data.autoplayMode ?? appSettings.autoplayMode,
+                            ytSync: data.ytSync ?? appSettings.ytSync
+                        };
+                    }
+                });
+            };
+
+            const saveSettings = async (newSettings) => {
+                if (!userId) return;
+                appSettings = { ...appSettings, ...newSettings };
+                try {
+                    await set(settingsRef(), appSettings);
+                } catch (e) {
+                    console.error('Erro ao salvar configurações', e);
+                    showModal('Erro', 'Não foi possível salvar as configurações. Tente novamente.');
+                }
             };
 
             const saveCuratedFeed = async () => {
@@ -487,14 +666,20 @@
                     buttonHtml = '';
                 }
 
+                const durationBadge = video.duration ? `<span class="absolute bottom-2 right-2 text-xs bg-black/80 text-white px-2 py-0.5 rounded">${video.duration}</span>` : '';
+                const liveBadge = video.isLive ? `<span class="absolute top-2 left-2 text-xs bg-red-600 text-white px-2 py-0.5 rounded">AO VIVO</span>` : '';
+                const publishedInfo = video.publishedTime ? `<span class="text-xs text-gray-500">• ${video.publishedTime}</span>` : '';
+
                 card.innerHTML = `
                     <div class="relative w-full aspect-video">
                         <img src="${video.thumbnail}" alt="Thumbnail do vídeo" class="w-full h-full object-cover">
+                        ${durationBadge}
+                        ${liveBadge}
                     </div>
                     <div class="p-4">
                         <h3 class="text-lg font-semibold line-clamp-2">${video.title}</h3>
                         <p class="text-sm text-gray-400 mt-1">${video.channel}</p>
-                        <p class="text-xs text-gray-500">${video.views}</p>
+                        <p class="text-xs text-gray-500">${video.views} ${publishedInfo}</p>
                         ${buttonHtml}
                     </div>
                 `;
@@ -596,6 +781,57 @@
             }
 
             // --- Main Application Logic ---
+            function formatViewCount(n) {
+                if (!n) return '';
+                const num = Number(n);
+                if (num < 1000) return `${num} visualizações`;
+                const units = ["mil", "mi", "bi", "tri"];
+                let u = -1, v = num;
+                while (v >= 1000 && u < units.length - 1) { v /= 1000; u++; }
+                return `${v.toFixed(v < 10 ? 1 : 0)} ${units[u]} visualizações`;
+            }
+
+            function parseISODuration(iso) {
+                if (!iso) return '';
+                const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+                if (!m) return '';
+                const h = parseInt(m[1]||'0',10), mi = parseInt(m[2]||'0',10), s = parseInt(m[3]||'0',10);
+                const parts = [];
+                if (h) parts.push(String(h));
+                parts.push(String(h ? mi.toString().padStart(2,'0') : mi));
+                parts.push(String(s).padStart(2,'0'));
+                return parts.join(':');
+            }
+
+            function timeAgo(iso) {
+                if (!iso) return '';
+                const then = new Date(iso).getTime();
+                const now = Date.now();
+                const diff = Math.max(0, now - then);
+                const s = Math.floor(diff/1000), m = Math.floor(s/60), h = Math.floor(m/60), d = Math.floor(h/24), w = Math.floor(d/7), mo = Math.floor(d/30), y = Math.floor(d/365);
+                if (y>0) return `há ${y} ano${y>1?'s':''}`;
+                if (mo>0) return `há ${mo} mês${mo>1?'es':''}`;
+                if (w>0) return `há ${w} semana${w>1?'s':''}`;
+                if (d>0) return `há ${d} dia${d>1?'s':''}`;
+                if (h>0) return `há ${h} hora${h>1?'s':''}`;
+                if (m>0) return `há ${m} minuto${m>1?'s':''}`;
+                return `agora`;
+            }
+
+            function computePublishedAfter(option) {
+                if (!option || option === 'any') return null;
+                const now = new Date();
+                const dt = new Date(now);
+                switch(option){
+                    case 'hour': dt.setHours(now.getHours()-1); break;
+                    case 'day': dt.setDate(now.getDate()-1); break;
+                    case 'week': dt.setDate(now.getDate()-7); break;
+                    case 'month': dt.setMonth(now.getMonth()-1); break;
+                    case 'year': dt.setFullYear(now.getFullYear()-1); break;
+                }
+                return dt.toISOString();
+            }
+
             window.searchVideos = async () => {
                 const query = searchInput.value.trim();
                 if (!query) return;
@@ -607,23 +843,80 @@
                     </div>
                 `;
                 searchResultsContainer.classList.remove('hidden');
+                if (feedSection) feedSection.classList.add('hidden');
 
                 try {
-                    const response = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&key=${YOUTUBE_API_KEY}`);
-                    const data = await response.json();
-                    
-                    if (data.items && data.items.length > 0) {
-                        searchResultsGrid.innerHTML = '';
-                        const videos = data.items.map(item => ({
-                            id: item.id.videoId,
-                            title: item.snippet.title,
-                            channel: item.snippet.channelTitle,
-                            thumbnail: item.snippet.thumbnails.high.url,
-                            views: 'N/A',
-                            description: item.snippet.description
-                        }));
-                        currentSearchResults = videos;
+                    const order = (orderSelect?.value)||'relevance';
+                    const duration = (durationSelect?.value)||'any';
+                    const uploadDate = (uploadDateSelect?.value)||'any';
+                    const publishedAfter = computePublishedAfter(uploadDate);
 
+                    const params = new URLSearchParams({
+                        part: 'snippet',
+                        q: query,
+                        type: 'video',
+                        key: YOUTUBE_API_KEY,
+                        maxResults: '24',
+                        order,
+                        regionCode: 'BR',
+                        relevanceLanguage: 'pt-BR',
+                        safeSearch: 'strict'
+                    });
+                    if (duration !== 'any') params.set('videoDuration', duration);
+                    if (publishedAfter) params.set('publishedAfter', publishedAfter);
+
+                    const searchUrl = `https://www.googleapis.com/youtube/v3/search?${params.toString()}`;
+                    const response = await fetch(searchUrl);
+                    const data = await response.json();
+
+                    if (data.items && data.items.length > 0) {
+                        const ids = data.items.map(it => it.id.videoId).filter(Boolean);
+                        let videos = [];
+                        try {
+                            const infoParams = new URLSearchParams({
+                                part: 'snippet,contentDetails,statistics',
+                                id: ids.join(','),
+                                key: YOUTUBE_API_KEY
+                            });
+                            const infoUrl = `https://www.googleapis.com/youtube/v3/videos?${infoParams.toString()}`;
+                            const infoRes = await fetch(infoUrl);
+                            const info = await infoRes.json();
+                            const byId = new Map(info.items.map(v => [v.id, v]));
+                            videos = data.items.map(item => {
+                                const v = byId.get(item.id.videoId);
+                                const snippet = v?.snippet || item.snippet;
+                                const stats = v?.statistics;
+                                const details = v?.contentDetails;
+                                const isLive = (snippet?.liveBroadcastContent === 'live');
+                                return {
+                                    id: item.id.videoId,
+                                    title: snippet?.title || item.snippet.title,
+                                    channel: snippet?.channelTitle || item.snippet.channelTitle,
+                                    thumbnail: (snippet?.thumbnails?.maxres?.url || snippet?.thumbnails?.high?.url || item.snippet.thumbnails.high.url),
+                                    views: formatViewCount(stats?.viewCount),
+                                    duration: isLive ? null : parseISODuration(details?.duration),
+                                    publishedTime: timeAgo(snippet?.publishedAt),
+                                    description: snippet?.description,
+                                    isLive
+                                };
+                            });
+                        } catch (e) {
+                            // Fallback se a chamada /videos falhar
+                            videos = data.items.map(item => ({
+                                id: item.id.videoId,
+                                title: item.snippet.title,
+                                channel: item.snippet.channelTitle,
+                                thumbnail: item.snippet.thumbnails.high.url,
+                                views: '',
+                                duration: null,
+                                publishedTime: timeAgo(item.snippet.publishedAt),
+                                description: item.snippet.description,
+                                isLive: item.snippet.liveBroadcastContent === 'live'
+                            }));
+                        }
+
+                        currentSearchResults = videos;
+                        searchResultsGrid.innerHTML = '';
                         videos.forEach(video => {
                             const card = createVideoCard(video, true);
                             searchResultsGrid.appendChild(card);
@@ -694,15 +987,13 @@
                                     ifr.setAttribute('allowfullscreen', 'true');
                                     ifr.setAttribute('playsinline', '1');
                                 } catch (_) {}
-                                e.target.getIframe().requestFullscreen();
                             }
                         }
                     });
                 } else {
                     // Se o player já existe, apenas carrega o novo vídeo
                     player.loadVideoById(videoId);
-                    const iframe = player.getIframe();
-                    if (iframe.requestFullscreen) iframe.requestFullscreen();
+                    // sem forçar fullscreen; usuário escolhe (como no YouTube)
                 }
             };
             
@@ -811,6 +1102,9 @@
                     searchVideos();
                 }
             });
+            if (orderSelect) orderSelect.addEventListener('change', () => searchVideos());
+            if (uploadDateSelect) uploadDateSelect.addEventListener('change', () => searchVideos());
+            if (durationSelect) durationSelect.addEventListener('change', () => searchVideos());
             // Eventos de filtros/busca do feed
             if (feedSearchInput) feedSearchInput.addEventListener('input', renderCuratedFeed);
             if (channelFilter) channelFilter.addEventListener('change', renderCuratedFeed);
