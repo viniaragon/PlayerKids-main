@@ -165,6 +165,11 @@
                         </select>
                     </div>
                 </div>
+                <div class="flex justify-end mb-4">
+                    <button id="bgPlayButton" class="px-4 py-2 text-sm font-semibold rounded-full bg-indigo-600 hover:bg-indigo-500 text-white transition-colors duration-200">
+                        Segundo plano
+                    </button>
+                </div>
                 <div id="curatedFeedContainer" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                     <!-- User's curated videos will be injected here by JavaScript -->
                 </div>
@@ -242,6 +247,7 @@
             const userMenu = document.getElementById('userMenu');
             const logoutMenuItem = document.getElementById('logoutMenuItem');
             const openSettings = document.getElementById('openSettings');
+            const bgPlayButton = document.getElementById('bgPlayButton');
 
             // --- Firebase Setup ---
             const firebaseConfig = {
@@ -338,6 +344,73 @@
                     showModal('Configurações', '<p class="text-gray-300">Em breve: preferências e ajustes da conta.</p>');
                     if (userMenu) userMenu.classList.add('hidden');
                 });
+            }
+
+            // --- Background playback helpers ---
+            function setupMediaSession(video) {
+                if (!('mediaSession' in navigator) || !video) return;
+                try {
+                    navigator.mediaSession.metadata = new MediaMetadata({
+                        title: video.title || 'Reprodução',
+                        artist: video.channel || 'Canal',
+                        album: 'Meu Feed',
+                        artwork: video.thumbnail ? [
+                            { src: video.thumbnail, sizes: '512x288', type: 'image/jpeg' }
+                        ] : []
+                    });
+
+                    navigator.mediaSession.setActionHandler('play', () => player?.playVideo?.());
+                    navigator.mediaSession.setActionHandler('pause', () => player?.pauseVideo?.());
+                    navigator.mediaSession.setActionHandler('previoustrack', () => {
+                        const currentId = player?.getVideoData?.().video_id;
+                        const i = curatedFeed.findIndex(v => v.id === currentId);
+                        if (i > 0) playVideo(curatedFeed[i - 1].id);
+                    });
+                    navigator.mediaSession.setActionHandler('nexttrack', () => {
+                        const currentId = player?.getVideoData?.().video_id;
+                        const i = curatedFeed.findIndex(v => v.id === currentId);
+                        if (i !== -1 && i + 1 < curatedFeed.length) playVideo(curatedFeed[i + 1].id);
+                    });
+                } catch (_) {}
+            }
+
+            async function enterBackgroundPlayback() {
+                if (!player) {
+                    showModal('Segundo plano', 'Abra um vídeo do seu feed primeiro.');
+                    return;
+                }
+                try {
+                    const iframe = player.getIframe();
+                    if (iframe) {
+                        const allow = iframe.getAttribute('allow') || '';
+                        const merged = Array.from(new Set((allow + '; autoplay; encrypted-media; picture-in-picture; fullscreen').split(';').map(s => s.trim()).filter(Boolean))).join('; ');
+                        iframe.setAttribute('allow', merged);
+                        iframe.setAttribute('allowfullscreen', 'true');
+                        iframe.setAttribute('playsinline', '1');
+                    }
+                    // Tentativa programática de PiP (pode não estar disponível)
+                    if (document.pictureInPictureEnabled && iframe && typeof iframe.requestPictureInPicture === 'function') {
+                        await iframe.requestPictureInPicture();
+                        return;
+                    }
+                } catch (_) { /* silent */ }
+
+                // Instruções de fallback
+                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+                const isAndroid = /Android/.test(navigator.userAgent);
+                let tips = '';
+                if (isIOS) {
+                    tips = '<ul class="list-disc list-inside space-y-1"><li>Toque no vídeo em tela cheia e depois no botão Picture‑in‑Picture.</li><li>Saia do Safari: o áudio continua no fundo.</li></ul>';
+                } else if (isAndroid) {
+                    tips = '<ul class="list-disc list-inside space-y-1"><li>Toque no ícone Picture‑in‑Picture no player (ou use o menu do vídeo).</li><li>Pressione Home: o PiP mantém o áudio.</li></ul>';
+                } else {
+                    tips = '<ul class="list-disc list-inside space-y-1"><li>Clique com o botão direito no vídeo (duas vezes, se necessário) e escolha “Picture in Picture”.</li><li>Ou use o botão PiP na barra do player.</li></ul>';
+                }
+                showModal('Reprodução em segundo plano', `<p class="mb-2">Para continuar ouvindo com a tela minimizada, use Picture‑in‑Picture:</p>${tips}`);
+            }
+
+            if (bgPlayButton) {
+                bgPlayButton.addEventListener('click', () => enterBackgroundPlayback());
             }
 
             // --- Realtime Database Functions ---
@@ -598,6 +671,11 @@
                     saveCuratedFeed();
                     renderCuratedFeed();
                 }
+                // Atualiza Media Session
+                try {
+                    const meta = curatedFeed.find(v => v.id === videoId) || currentSearchResults.find(v => v.id === videoId);
+                    setupMediaSession(meta);
+                } catch (_) {}
                 videoModal.classList.remove('hidden');
                 videoModal.classList.add('flex');
                 if (!player) {
@@ -608,7 +686,17 @@
                         videoId: videoId,
                         events: {
                             'onStateChange': onPlayerStateChange,
-                            'onReady': e => e.target.getIframe().requestFullscreen()
+                            'onReady': e => {
+                                const ifr = e.target.getIframe();
+                                try {
+                                    const allow = ifr.getAttribute('allow') || '';
+                                    const merged = Array.from(new Set((allow + '; autoplay; encrypted-media; picture-in-picture; fullscreen').split(';').map(s => s.trim()).filter(Boolean))).join('; ');
+                                    ifr.setAttribute('allow', merged);
+                                    ifr.setAttribute('allowfullscreen', 'true');
+                                    ifr.setAttribute('playsinline', '1');
+                                } catch (_) {}
+                                e.target.getIframe().requestFullscreen();
+                            }
                         }
                     });
                 } else {
