@@ -59,16 +59,16 @@
         </div>
     </div>
 
-    <!-- Modal para o reprodutor de vídeo -->
-    <div id="videoModal" class="modal hidden items-center justify-center bg-black">
+    <!-- Modal para o reprodutor de vídeo (não usado no modo 'embutido') -->
+    <div id="videoModal" class="modal hidden items-start justify-center pt-8 sm:pt-12">
         <!-- Botão para fechar -->
         <button onclick="closeVideoModal()" class="absolute top-4 right-4 text-white text-2xl font-bold">&times;</button>
-        <!-- Botão de reprodução em segundo plano (overlay) -->
-        <button id="bgPlayButton" class="absolute bottom-4 left-4 px-4 py-2 text-sm font-semibold rounded-full bg-indigo-600 hover:bg-indigo-500 text-white transition-colors duration-200">
+        <!-- Antigo botão de segundo plano do overlay (id alterado para evitar duplicidade) -->
+        <button id="bgPlayButtonModal" class="absolute bottom-4 left-4 px-4 py-2 text-sm font-semibold rounded-full bg-indigo-600 hover:bg-indigo-500 text-white transition-colors duration-200">
             Segundo plano
         </button>
-        <!-- Container do player (100% largura/altura) -->
-        <div id="videoPlayerContainer" class="w-full max-w-5xl aspect-video bg-black rounded-lg overflow-hidden shadow-xl"></div>
+        <!-- Container antigo do player (não utilizado no modo embutido) -->
+        <div id="videoPlayerContainerModal" class="w-[90vw] sm:w-[70vw] md:w-[60vw] lg:w-[50vw] xl:w-[40vw] max-w-[360px] aspect-video bg-black rounded-xl overflow-hidden shadow-2xl flex items-center justify-center"></div>
     </div>
 
     <!-- Container da Aplicação -->
@@ -194,6 +194,20 @@
                         </select>
                     </div>
                 </div>
+                <!-- Player embutido (estilo YouTube) -->
+                <div id="inlinePlayer" class="hidden sticky top-0 z-20 bg-gray-900/95 backdrop-blur border-b border-gray-800 py-3">
+                    <div class="mx-auto w-[94vw] sm:w-[88vw] md:w-[80vw] lg:w-[72vw] xl:w-[64vw] max-w-[720px]">
+                        <div class="relative">
+                            <button id="inlineCloseButton" class="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-100 flex items-center justify-center shadow">
+                                &times;
+                            </button>
+                            <div class="mb-2 flex items-center gap-2">
+                                <button id="bgPlayButton" class="px-3 py-1.5 text-xs font-semibold rounded-full bg-indigo-600 hover:bg-indigo-500 text-white transition-colors">Segundo plano</button>
+                            </div>
+                            <div id="videoPlayerContainer" class="w-full aspect-video bg-black rounded-lg overflow-hidden shadow"></div>
+                        </div>
+                    </div>
+                </div>
                 <div id="curatedFeedContainer" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                     <!-- User's curated videos will be injected here by JavaScript -->
                 </div>
@@ -236,7 +250,7 @@
 
                 // Autoplay desativado
                 if (!appSettings.autoplayEnabled) {
-                    closeVideoModal();
+                    closeInlinePlayer?.();
                     return;
                 }
 
@@ -271,7 +285,7 @@
                     const nextVideoId = curatedFeed[nextIndex].id;
                     playVideo(nextVideoId);
                 } else {
-                    closeVideoModal();
+                    closeInlinePlayer?.();
                 }
             }
         }
@@ -301,6 +315,8 @@
             const modalContent = document.getElementById('modalContent');
             const suggestTopicsButton = document.getElementById('suggestTopicsButton');
             const videoModal = document.getElementById('videoModal');
+            const inlinePlayer = document.getElementById('inlinePlayer');
+            const inlineCloseButton = document.getElementById('inlineCloseButton');
             const videoPlayerContainer = document.getElementById('videoPlayerContainer');
             const logoutButton = document.getElementById('logoutButton');
             const feedSearchInput = document.getElementById('feedSearchInput');
@@ -564,6 +580,16 @@
             if (bgPlayButton) {
                 bgPlayButton.addEventListener('click', () => enterBackgroundPlayback());
             }
+
+            function closeInlinePlayer() {
+                if (player) {
+                    try { player.destroy(); } catch (_) {}
+                    player = null;
+                }
+                if (videoPlayerContainer) videoPlayerContainer.innerHTML = '';
+                inlinePlayer?.classList.add('hidden');
+            }
+            inlineCloseButton?.addEventListener('click', closeInlinePlayer);
 
             // --- Realtime Database Functions ---
             const curatedFeedRef = () => ref(db, `/artifacts/${appId}/users/${userId}/curated_feed/feed_doc`);
@@ -968,10 +994,10 @@
                     const meta = curatedFeed.find(v => v.id === videoId) || currentSearchResults.find(v => v.id === videoId);
                     setupMediaSession(meta);
                 } catch (_) {}
-                videoModal.classList.remove('hidden');
-                videoModal.classList.add('flex');
+                // Mostrar player embutido
+                inlinePlayer?.classList.remove('hidden');
                 if (!player) {
-                    // Cria o player do YouTube pela primeira vez
+                    // Cria o player do YouTube pela primeira vez (embutido)
                     player = new YT.Player('videoPlayerContainer', {
                         height: '100%',
                         width: '100%',
@@ -993,7 +1019,6 @@
                 } else {
                     // Se o player já existe, apenas carrega o novo vídeo
                     player.loadVideoById(videoId);
-                    // sem forçar fullscreen; usuário escolhe (como no YouTube)
                 }
             };
             
