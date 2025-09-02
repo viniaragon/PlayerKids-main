@@ -218,7 +218,7 @@
     <!-- JavaScript for functionality -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
 
         // Variáveis para armazenar o estado global
@@ -233,6 +233,7 @@
             autoplayMode: 'feed', // 'feed' | 'youtube'
             ytSync: false
         };
+        let ytAccessToken = null;
         
         // A sua chave da API do YouTube
         const YOUTUBE_API_KEY = "AIzaSyAmNMrkBFKqaUV-aOa1XBtJ5sEKBjDJwWA";
@@ -466,6 +467,18 @@
                     const stgSave = document.getElementById('stgSave');
                     const stgClose = document.getElementById('stgClose');
                     const ytConnectBtn = document.getElementById('ytConnectBtn');
+                    // Adiciona botão de sincronização quando conectado
+                    if (appSettings.ytSync) {
+                        const syncBtn = document.createElement('button');
+                        syncBtn.id = 'ytSyncNow';
+                        syncBtn.className = 'mt-2 px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-gray-900';
+                        syncBtn.textContent = 'Sincronizar agora';
+                        ytConnectBtn.parentElement?.appendChild(syncBtn);
+                        syncBtn.addEventListener('click', async () => {
+                            closeModal();
+                            await runYouTubeSyncPreview();
+                        });
+                    }
                     const modeInputs = Array.from(document.querySelectorAll('input[name="stgAutoplayMode"]'));
 
                     stgAutoplay?.addEventListener('change', () => {
@@ -476,9 +489,13 @@
                         }
                     });
 
-                    ytConnectBtn?.addEventListener('click', (e) => {
+                    ytConnectBtn?.addEventListener('click', async (e) => {
                         e.preventDefault();
-                        showModal('Conectar YouTube', '<p class="text-gray-300">Integração com a conta do YouTube virá em breve. Por enquanto, mantenha suas preferências salvas aqui.</p>');
+                        const token = await connectYouTube();
+                        if (token) {
+                            closeModal();
+                            await runYouTubeSyncPreview();
+                        }
                     });
 
                     stgClose?.addEventListener('click', () => closeModal());
@@ -540,6 +557,104 @@
                         if (i !== -1 && i + 1 < curatedFeed.length) playVideo(curatedFeed[i + 1].id);
                     });
                 } catch (_) {}
+            }
+
+            async function connectYouTube() {
+                try {
+                    const provider = new GoogleAuthProvider();
+                    provider.addScope('https://www.googleapis.com/auth/youtube.readonly');
+                    const result = await signInWithPopup(auth, provider);
+                    const credential = GoogleAuthProvider.credentialFromResult(result);
+                    const token = credential?.accessToken;
+                    if (!token) throw new Error('Token do YouTube ausente');
+                    ytAccessToken = token;
+                    sessionStorage.setItem('yt_access_token', token);
+                    await saveSettings({ ytSync: true });
+                    return token;
+                } catch (e) {
+                    console.error('Falha ao conectar YouTube', e);
+                    showModal('Erro', 'Não foi possível conectar à sua conta do YouTube.');
+                    return null;
+                }
+            }
+
+            async function listSubscriptions(token, pageToken) {
+                const url = new URL('https://www.googleapis.com/youtube/v3/subscriptions');
+                url.search = new URLSearchParams({
+                    part: 'snippet,contentDetails',
+                    mine: 'true',
+                    maxResults: '20',
+                    ...(pageToken ? { pageToken } : {})
+                });
+                const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+                if (!r.ok) throw new Error('Falha ao carregar inscrições');
+                return r.json();
+            }
+
+            async function fetchLatestFromChannels(token, channels, perChannel = 1) {
+                const results = [];
+                for (const ch of channels) {
+                    try {
+                        const url = new URL('https://www.googleapis.com/youtube/v3/search');
+                        url.search = new URLSearchParams({
+                            part: 'snippet',
+                            channelId: ch.channelId,
+                            order: 'date',
+                            type: 'video',
+                            maxResults: String(perChannel)
+                        });
+                        const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+                        if (!r.ok) continue;
+                        const data = await r.json();
+                        for (const item of (data.items || [])) {
+                            results.push({
+                                id: item.id.videoId,
+                                title: item.snippet.title,
+                                channel: item.snippet.channelTitle,
+                                thumbnail: item.snippet.thumbnails?.high?.url,
+                                views: '',
+                                description: item.snippet.description
+                            });
+                        }
+                    } catch (_) { /* ignore channel errors */ }
+                }
+                return results;
+            }
+
+            async function runYouTubeSyncPreview() {
+                try {
+                    const token = ytAccessToken || sessionStorage.getItem('yt_access_token') || await connectYouTube();
+                    if (!token) return;
+                    const subs = await listSubscriptions(token);
+                    const channels = (subs.items || []).slice(0, 8).map(s => ({
+                        channelId: s.snippet.resourceId.channelId,
+                        title: s.snippet.title
+                    }));
+                    const latest = await fetchLatestFromChannels(token, channels, 1);
+                    if (latest.length === 0) {
+                        showModal('Sincronização', 'Não encontramos vídeos recentes nas suas inscrições.');
+                        return;
+                    }
+                    const cards = latest.map(v => `
+                        <div class="bg-gray-800 rounded p-3 flex gap-3 items-center">
+                            <img src="${v.thumbnail}" class="w-28 h-16 object-cover rounded"/>
+                            <div class="flex-1">
+                                <div class="text-sm font-medium line-clamp-2">${v.title}</div>
+                                <div class="text-xs text-gray-400">${v.channel}</div>
+                            </div>
+                            <button class="px-3 py-1 text-xs rounded-full bg-blue-600 hover:bg-blue-500 text-gray-900" onclick="addToFeed('${v.id}')">Adicionar</button>
+                        </div>
+                    `).join('');
+                    const html = `
+                        <div class="space-y-3">
+                            <p class="text-gray-300">Prévia dos últimos vídeos das suas inscrições (amostra de ${channels.length} canais).</p>
+                            <div class="grid grid-cols-1 gap-2 max-h-[60vh] overflow-y-auto">${cards}</div>
+                        </div>`;
+                    showModal('Sincronizar YouTube', html);
+                } catch (e) {
+                    console.error(e);
+                    showModal('Erro', 'Falha ao sincronizar suas inscrições do YouTube.');
+                }
             }
 
             async function enterBackgroundPlayback() {

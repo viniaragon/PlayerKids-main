@@ -1,0 +1,31 @@
+Roadmap e Notas
+
+1) TODO (próximas entregas)
+- Player embutido: modo teatro opcional (expandir barra sticky para largura maior e ocultar distrações ao rolar).
+- Melhorias de busca: filtros adicionais (tipo: live/short/4K), paginação e ordenação por relevância dinâmica.
+- Importador YouTube: wizard com seleção de canais e importação em lote, com limites de cota e progresso.
+- Sincronização leve: badge “novo/assistido” por vídeo (persistir no feed) e ação “Desfazer”.
+- UX mobile: gestos para minimizar o player e botão PiP mais acessível.
+
+2) Caminho A (implementado)
+- Autenticação via Firebase Auth (Google Sign-In) com escopo youtube.readonly.
+- Obtenção de access_token curto (≈1h) e chamadas diretas à YouTube Data API.
+- Sincronização: leitura das inscrições do usuário e prévia de vídeos recentes (amostra) com opção de “Adicionar ao Feed”.
+- Limitações: sem refresh token; ao expirar, usuário reconecta. API não expõe feed “Home”.
+
+3) Caminho B (robusto, futuro)
+- Backend (Firebase Functions) para realizar OAuth com PKCE/Client Secret e armazenar refresh_token com segurança.
+- Endpoints de backend para: renovar tokens, listar inscrições, playlists, e obter vídeos relacionados.
+- Tarefas agendadas para pré‑carregar sugestões e atualizações diárias do usuário, respeitando cotas.
+- Armazenar preferências/estado da sincronização por usuário (última execução, canais incluídos etc.).
+
+4) Modo Teatro (futuro)
+- Alternar entre “compacto” (barra sticky atual) e “teatro” (container largo, ~1280×720 responsivo) embutido abaixo do header.
+- Controles: tecla T para alternar, lembrar preferência do usuário.
+- Layout: diminuir opacidade/escala do restante do feed enquanto o modo teatro estiver ativo (sem overlay fullscreen).
+
+5) Observações de implementação
+- Ativar YouTube Data API v3 no projeto Google e configurar a tela de consentimento com o escopo youtube.readonly.
+- O feed “Home” do YouTube não está disponível via API; usar inscrições, playlists e relatedToVideoId para simular recomendações.
+- Respeitar cotas: limitar chamadas por sincronização (ex.: amostra de N canais e 1–3 vídeos por canal).
+
