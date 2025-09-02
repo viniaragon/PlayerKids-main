@@ -218,7 +218,7 @@
     <!-- JavaScript for functionality -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
 
         // Variáveis para armazenar o estado global
@@ -377,6 +377,8 @@
                     mainApp.classList.remove('hidden');
                     listenToCuratedFeed();
                     listenToSettings();
+                    // Trata resultado de redirect do Google (se houver)
+                    handleYouTubeRedirectResult();
                 } else {
                     // Se o usuário não estiver logado, mostra a tela de autenticação
                     mainApp.classList.add('hidden');
@@ -573,8 +575,44 @@
                     return token;
                 } catch (e) {
                     console.error('Falha ao conectar YouTube', e);
-                    showModal('Erro', 'Não foi possível conectar à sua conta do YouTube.');
+                    const code = e?.code || 'desconhecido';
+                    if (code === 'auth/popup-blocked' || code === 'auth/cancelled-popup-request') {
+                        try {
+                            const provider = new GoogleAuthProvider();
+                            provider.addScope('https://www.googleapis.com/auth/youtube.readonly');
+                            sessionStorage.setItem('yt_redirect_intent', '1');
+                            await signInWithRedirect(auth, provider);
+                            return null; // fluxo continuará no getRedirectResult
+                        } catch (er) {
+                            console.error('Redirect também falhou', er);
+                        }
+                    }
+                    const msg = e?.message || 'Erro inesperado';
+                    showModal('Erro ao conectar', `<p>Não foi possível conectar à sua conta do YouTube.</p><p class="text-xs text-gray-400 mt-2">${code}: ${msg}</p>`);
                     return null;
+                }
+            }
+
+            async function handleYouTubeRedirectResult() {
+                try {
+                    const intent = sessionStorage.getItem('yt_redirect_intent');
+                    const result = await getRedirectResult(auth);
+                    if (result) {
+                        const credential = GoogleAuthProvider.credentialFromResult(result);
+                        const token = credential?.accessToken;
+                        if (token) {
+                            ytAccessToken = token;
+                            sessionStorage.setItem('yt_access_token', token);
+                            await saveSettings({ ytSync: true });
+                            // opcional: abrir prévia automaticamente quando havia intenção
+                            if (intent === '1') {
+                                sessionStorage.removeItem('yt_redirect_intent');
+                                await runYouTubeSyncPreview();
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Erro ao processar redirect do YouTube', e);
                 }
             }
 
